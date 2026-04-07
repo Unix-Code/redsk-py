@@ -3,13 +3,29 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Literal, Self, Union
+from typing import ClassVar, Literal, Protocol, Self, Union
 
 import pyray as pr
 
 from client.utils import StrPointer, bbox2d_contains_rect, bbox2d_pad
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class WindowSettings:
+    DEFAULT_SCREEN_HEIGHT: ClassVar[int] = 600
+
+    screen_width: int = 800
+    screen_height: int = 600
+
+    @property
+    def scale(self) -> float:
+        return self.screen_height / self.DEFAULT_SCREEN_HEIGHT
+
+
+class ScreenProtocol(Protocol):
+    def __call__(self) -> "ScreenProtocol": ...
 
 
 class GuiTextInputBox:
