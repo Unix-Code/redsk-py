@@ -1,0 +1,19 @@
+version = 1
+revision = 3
+requires-python = ">=3.13"
+
+[[package]]
+name = "common"
+version = "0.1.0"
+source = { editable = "../common" }
+
+[[package]]
+name = "server"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "common" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "common", editable = "../common" }]

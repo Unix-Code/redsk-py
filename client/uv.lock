@@ -48,6 +48,26 @@ wheels = [
 ]
 
 [[package]]
+name = "client"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "common" },
+    { name = "raylib" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "common", editable = "../common" },
+    { name = "raylib", specifier = ">=5.5.0.4" },
+]
+
+[[package]]
+name = "common"
+version = "0.1.0"
+source = { editable = "../common" }
+
+[[package]]
 name = "pycparser"
 version = "3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -80,14 +100,3 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/95/ea/02914524f5a4f774f9965e9865283260b7c0a733da7a6e6c3627287f4ffa/raylib-5.5.0.4-cp314-cp314-win32.whl", hash = "sha256:ca0a19c251cc1f3574e1f9fe33a4b0a6a661479b3d5d593487072485e8b14eee", size = 1495571, upload-time = "2025-12-11T15:28:16.015Z" },
     { url = "https://files.pythonhosted.org/packages/38/7f/542019daf0e13e2f5c178f7f37a76e8493d6a0952332ffd1a55f34738ff1/raylib-5.5.0.4-cp314-cp314-win_amd64.whl", hash = "sha256:cb1453fc68ee2ad5848ee41123ec1aab97d5a553e55aeb1071a332e1c8626a48", size = 1763211, upload-time = "2025-12-11T15:28:18.261Z" },
 ]
-
-[[package]]
-name = "redsk-py"
-version = "0.1.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "raylib" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "raylib", specifier = ">=5.5.0.4" }]

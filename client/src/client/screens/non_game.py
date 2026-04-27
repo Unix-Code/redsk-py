@@ -1,6 +1,13 @@
 from typing import override
 
 import pyray as pr
+from common.networking import ClientNetworking, ConnectionState
+from common.protocol import (
+    GreetingsMessageCodec,
+    MsgType,
+    RegistrationMessage,
+    StartGameMessage,
+)
 
 from client.gui import (
     GuiTextInputBox,
@@ -10,9 +17,8 @@ from client.gui import (
     WindowSettings,
     gui_set_text_size,
 )
+from client.screens import GameScreen
 from client.utils import StrPointer
-from common.networking import ClientNetworking, ConnectionState
-from common.protocol import GreetingsMessage, MsgType, RegistrationMessage
 
 
 class ConnectScreen(ScreenProtocol):
@@ -40,7 +46,9 @@ class ConnectScreen(ScreenProtocol):
             pr.gui_disable()
         else:
             pr.gui_enable()
-            if self.client_networking.connection_state == ConnectionState.CONNECTED:
+            if self.client_networking.connection_state == ConnectionState.FAILED:
+                self.client_networking.reset()
+            elif self.client_networking.connection_state == ConnectionState.CONNECTED:
                 return RegistrationScreen(
                     window_settings=self.window_settings,
                     client_networking=self.client_networking,
@@ -122,13 +130,14 @@ class RegistrationScreen(ScreenProtocol):
         self.player_name = StrPointer(capacity=64, initial_value="")
         self.player_name_text_box = GuiTextInputBox()
         self.is_registering = False
+        self._greetings_msg_codec = GreetingsMessageCodec()
 
     @override
     def __call__(self) -> ScreenProtocol:
         messages = self.client_networking.poll()
         for msg_type, payload in messages:
             if self.is_registering and msg_type == MsgType.GREETINGS:
-                msg = GreetingsMessage.unpack(payload)
+                msg = self._greetings_msg_codec.unpack(payload)
                 return LobbyScreen(
                     window_settings=self.window_settings,
                     client_networking=self.client_networking,
@@ -146,17 +155,17 @@ class RegistrationScreen(ScreenProtocol):
         with gui_set_text_size(20):
             pr.gui_panel(main_panel, "Registration")
 
-            registration_inputs = (
-                LayoutBuilder(
-                    padding=50 * self.window_settings.scale,
-                    margin=10 * self.window_settings.scale,
-                )
-                .snap(
-                    Placement(y=Placement.Snap.TOP, x=Placement.Snap.CENTER),
-                    parent=main_panel,
-                )
-                .set_placement_direction(Placement.Direction.VERTICAL)
+        registration_inputs = (
+            LayoutBuilder(
+                padding=50 * self.window_settings.scale,
+                margin=10 * self.window_settings.scale,
             )
+            .snap(
+                Placement(y=Placement.Snap.TOP, x=Placement.Snap.CENTER),
+                parent=main_panel,
+            )
+            .set_placement_direction(Placement.Direction.VERTICAL)
+        )
 
         self.player_name_text_box(
             bounds=registration_inputs.place_rect(
@@ -196,8 +205,56 @@ class LobbyScreen(ScreenProtocol):
         self.client_networking = client_networking
         self.player_id: str = player_id
         self.registered_player_name: str = registered_player_name
+        self.is_game_starting: bool = False
 
     @override
     def __call__(self) -> ScreenProtocol:
-        print(f"Hi, {self.registered_player_name}. Your ID: {self.player_id}")
+        messages = self.client_networking.poll()
+        for msg_type, payload in messages:
+            if self.is_game_starting and msg_type == MsgType.GAME_STATE:
+                return GameScreen(
+                    window_settings=self.window_settings,
+                    client_networking=self.client_networking,
+                    player_id=self.player_id,
+                    registered_player_name=self.registered_player_name,
+                )
+
+        # TODO: We should probably poll for network messages like disconnects, etc...
+
+        main_layout = LayoutBuilder(padding=50 * self.window_settings.scale).snap(
+            Placement(y=Placement.Snap.CENTER, x=Placement.Snap.CENTER)
+        )
+        main_panel = main_layout.place_rect(
+            width=self.window_settings.screen_width / 2,
+            height=self.window_settings.screen_height / 2,
+        )
+        with gui_set_text_size(20):
+            pr.gui_panel(main_panel, "Lobby")
+
+        lobby_inputs = (
+            LayoutBuilder(
+                padding=50 * self.window_settings.scale,
+                margin=10 * self.window_settings.scale,
+            )
+            .snap(
+                Placement(y=Placement.Snap.CENTER, x=Placement.Snap.CENTER),
+                parent=main_panel,
+            )
+            .set_placement_direction(Placement.Direction.VERTICAL)
+        )
+
+        with gui_set_text_size(20):
+            if self.is_game_starting:
+                pr.gui_disable()
+            if pr.gui_button(
+                lobby_inputs.place_rect(
+                    width=pr.measure_text("Start Game", 20) + 10,
+                    height=24 * self.window_settings.scale,
+                ),
+                "Start Game",
+            ):
+                self.client_networking.send_message(StartGameMessage())
+                self.is_game_starting = True
+            pr.gui_enable()
+
         return self

@@ -3,7 +3,12 @@ import sys
 import time
 
 from common.networking import ServerNetworking
-from common.protocol import GreetingsMessage, MsgType, RegistrationMessage
+from common.protocol import (
+    GameStateMessage,
+    GreetingsMessage,
+    MsgType,
+    RegistrationMessageCodec,
+)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -37,9 +42,9 @@ if __name__ == "__main__":
                                 player_names[client_id],
                             )
                             continue
-                        player_names[client_id] = RegistrationMessage.unpack(
-                            payload_bytes
-                        ).name
+                        player_names[client_id] = (
+                            RegistrationMessageCodec().unpack(payload_bytes).name
+                        )
                         logging.info(
                             "Client(%s) registered as: %s",
                             client_id,
@@ -51,6 +56,9 @@ if __name__ == "__main__":
                                 player_id=client_id, player_name=player_names[client_id]
                             ),
                         )
+                    elif msg_type == MsgType.START_GAME:
+                        # TODO: Do some role management / checks here?
+                        server.send_message(client_id, GameStateMessage({}))
                     else:
                         logging.error(
                             "Encountered unexpected message type: %s from Client(%s)",

@@ -7,7 +7,13 @@ from enum import Enum, auto
 from socket import AF_INET, SO_ERROR, SOCK_STREAM, SOL_SOCKET, socket
 from typing import TypeAlias, cast
 
-from common.protocol import MessageHeader, MsgType, TypedNetworkMessage
+from common.protocol import (
+    MessageHeader,
+    MessageHeaderCodec,
+    MsgType,
+    TypedNetworkMessage,
+    pack_network_message_into,
+)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -58,6 +64,7 @@ class CommonNetworking:
     def __init__(self, selector: selectors.DefaultSelector) -> None:
         self.selector = selector
         self.interfaces: dict[str, Connection] = {}
+        self._msg_header_codec = MessageHeaderCodec()
 
     def add_interface(self, client_id: ClientId, connection: Connection) -> None:
         self.interfaces[client_id] = connection
@@ -67,16 +74,18 @@ class CommonNetworking:
             logging.error("Cannot send message to unknown client: %s", client_id)
             return
 
-        msg_packed = msg.pack_into(
-            self.interfaces[client_id].out_buf,
+        msg_packed = pack_network_message_into(
+            obj=msg,
+            buf=self.interfaces[client_id].out_buf,
             # HACK: Leave an empty slot for the header
-            offset=self.interfaces[client_id].out_cursor + MessageHeader.HEADER_SIZE,
+            offset=self.interfaces[client_id].out_cursor
+            + MessageHeaderCodec.HEADER_SIZE,
         )
 
-        header_packed = MessageHeader(
-            msg_type=msg.MESSAGE_TYPE, msg_length=msg_packed
-        ).pack_into(
-            self.interfaces[client_id].out_buf, self.interfaces[client_id].out_cursor
+        header_packed = self._msg_header_codec.pack_into(
+            MessageHeader(msg_type=msg.MESSAGE_TYPE, msg_length=msg_packed),
+            self.interfaces[client_id].out_buf,
+            self.interfaces[client_id].out_cursor,
         )
 
         self.interfaces[client_id].out_cursor += header_packed + msg_packed
@@ -100,9 +109,10 @@ class CommonNetworking:
         if err != 0:
             conn.state = ConnectionState.FAILED
             self.close_connection("Connection failed", conn.client_id)
-        else:
-            logging.info("Connection established: %s", conn.addr)
-            conn.state = ConnectionState.CONNECTED
+            return
+
+        logging.info("Connection established: %s", conn.addr)
+        conn.state = ConnectionState.CONNECTED
         # Now, listen normally
         self.selector.modify(conn.sock, selectors.EVENT_READ, data=conn)
 
@@ -142,9 +152,9 @@ class CommonNetworking:
                 processed_bytes = 0
                 while (
                     conn_data.in_cursor - processed_bytes
-                ) >= MessageHeader.HEADER_SIZE:
+                ) >= self._msg_header_codec.HEADER_SIZE:
                     # 1. Peek at the header to see how much more data we need
-                    msg_header, read_offset = MessageHeader.unpack_from(
+                    msg_header, read_offset = self._msg_header_codec.unpack_from(
                         conn_data.in_buf
                     )
 
@@ -218,6 +228,13 @@ class ClientNetworking:
         self.common_networking = CommonNetworking(selector=self.selector)
         self.selector.register(self.sock, selectors.EVENT_READ, data=None)
 
+    def reset(self) -> None:
+        self.sock = socket(AF_INET, SOCK_STREAM)
+        self.sock.setblocking(False)
+        self.selector = selectors.DefaultSelector()
+        self.common_networking = CommonNetworking(selector=self.selector)
+        self.selector.register(self.sock, selectors.EVENT_READ, data=None)
+
     @property
     def connection_state(self) -> ConnectionState:
         return self._state
@@ -241,7 +258,7 @@ class ClientNetworking:
             errno.EINPROGRESS,
             errno.EALREADY,
         ):
-            logging.error("Unable to connect... Errno: %s", errno)
+            logging.error("Unable to connect... Errno: %s", errno.errorcode[err])
             self._state = ConnectionState.FAILED
             return
 
