@@ -5,12 +5,24 @@ import math
 import pyray as pr
 from common.hex import Hex, HexCoord
 
-
-def draw_hexagon(center: pr.Vector2, size: float, color: pr.Color) -> None:
-    pr.draw_poly_lines(center, 6, size, 30, color)
+from client.screens.draw_state import HexState
 
 
-def hex_coord_to_screen_cord(hex_coord: Hex, size: float) -> pr.Vector2:
+def draw_hexagon(
+    center: pr.Vector2,
+    size: float,
+    color: pr.Color,
+    state: HexState,
+) -> None:
+    pr.draw_poly(center, 6, size, 30, color)
+    outline_thickness = 4
+    if state == HexState.SELECTED:
+        pr.draw_poly_lines_ex(center, 6, size + 1, 30, outline_thickness, pr.WHITE)
+    elif state == HexState.HOVERED:
+        pr.draw_poly_lines_ex(center, 6, size + 1, 30, outline_thickness, pr.DARKGRAY)
+
+
+def hex_coord_to_world_coord(hex_coord: Hex, size: float) -> pr.Vector2:
     # Formula:
     # q_basis * hex_coord.q + r_basis * hex_coord.r = screen_coord
     q_basis = pr.Vector2(math.sqrt(3), 0)
@@ -25,7 +37,7 @@ def hex_coord_to_screen_cord(hex_coord: Hex, size: float) -> pr.Vector2:
     )
 
 
-def screen_coord_to_hex_coord(screen_coord: pr.Vector2, size: float) -> Hex:
+def world_coord_to_hex_coord(screen_coord: pr.Vector2, size: float) -> Hex:
     scaled_screen_coord = pr.vector2_scale(
         screen_coord,
         1 / size,
