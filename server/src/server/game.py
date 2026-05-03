@@ -46,7 +46,7 @@ class GameManager:
         self.turn: int = -1
 
     def start(self) -> None:
-        if self.turn < 0:
+        if self.turn >= 0:
             logging.error("Can't start game again once already started...")
             return
         self._map = MapBuilder().get_initial_map()
