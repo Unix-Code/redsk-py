@@ -3,6 +3,7 @@ from typing import override
 import pyray as pr
 from common.networking import ClientNetworking, ConnectionState
 from common.protocol import (
+    GameStateMessageCodec,
     GreetingsMessageCodec,
     MsgType,
     RegistrationMessage,
@@ -217,6 +218,7 @@ class LobbyScreen(ScreenProtocol):
                     client_networking=self.client_networking,
                     player_id=self.player_id,
                     registered_player_name=self.registered_player_name,
+                    initial_game_state=GameStateMessageCodec().unpack(payload),
                 )
 
         # TODO: We should probably poll for network messages like disconnects, etc...

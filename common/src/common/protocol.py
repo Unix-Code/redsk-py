@@ -80,19 +80,17 @@ V = TypeVar("V")
 
 
 class DictNetworkCodec(NetworkCodec[dict[K, V]]):
-    _SIZE_STRUCT = struct.Struct(">H")
-
     def __init__(
         self, key_codec: NetworkCodec[K], value_codec: NetworkCodec[V]
     ) -> None:
+        self._size_codec = PrimitiveStructNetworkCodec[int](">H")
         self._key_codec = key_codec
         self._value_codec = value_codec
 
     @override
     def pack_into(self, obj: dict[K, V], buf: Buffer, offset: int = 0) -> int:
         start_offset = offset
-        self._SIZE_STRUCT.pack_into(buf, offset, len(obj))
-        offset += self._SIZE_STRUCT.size
+        offset += self._size_codec.pack_into(len(obj), buf, offset)
 
         keys: list[K] = []
         values: list[V] = []
@@ -111,7 +109,7 @@ class DictNetworkCodec(NetworkCodec[dict[K, V]]):
     def unpack_from(self, buf: Buffer, offset: int = 0) -> tuple[dict[K, V], int]:
         start_offset = offset
 
-        dict_size, offset_delta_1 = self._SIZE_STRUCT.unpack_from(buf, offset)
+        dict_size, offset_delta_1 = self._size_codec.unpack_from(buf, offset)
         offset += offset_delta_1
 
         keys: list[K] = []
@@ -165,7 +163,7 @@ class PrimitiveStructNetworkCodec(NetworkCodec[T]):
 
 
 class HexNetworkCodec(NetworkCodec[Hex]):
-    _STRUCT = struct.Struct(">HH")
+    _STRUCT = struct.Struct(">hh")
 
     @override
     def pack_into(self, obj: Hex, buf: Buffer, offset: int = 0) -> int:
@@ -191,7 +189,12 @@ class LandNetworkCodec(NetworkCodec[Land]):
     def pack_into(self, obj: Land, buf: Buffer, offset: int = 0) -> int:
         start_offset = offset
         offset += self._biome_codec.pack_into(obj.biome, buf, offset)
-        offset += self._resources_codec.pack_into(obj.resources, buf, offset)
+        offset += self._resources_codec.pack_into(
+            # NOTE: We filter out 0-valued resources to avoid sending more data over the wire.
+            {k: v for k, v in obj.resources.items() if v != 0},
+            buf,
+            offset,
+        )
         return offset - start_offset
 
     @override
@@ -275,23 +278,34 @@ class GameStateMessage(TypedNetworkMessage):
     MESSAGE_TYPE: ClassVar[MsgType] = MsgType.GAME_STATE
 
     # TODO: There should be more fields here...
+    turn: int
     game_map: dict[Hex, Land]
 
 
 class GameStateMessageCodec(NetworkCodec[GameStateMessage]):
     def __init__(self) -> None:
+        self._turn_codec = PrimitiveStructNetworkCodec[int](struct_format=">B")
         self._map_codec = DictNetworkCodec(
             key_codec=HexNetworkCodec(), value_codec=LandNetworkCodec()
         )
 
     @override
     def pack_into(self, obj: GameStateMessage, buf: Buffer, offset: int = 0) -> int:
-        return self._map_codec.pack_into(obj.game_map, buf, offset)
+        start_offset = offset
+        offset += self._turn_codec.pack_into(obj.turn, buf, offset)
+        offset += self._map_codec.pack_into(obj.game_map, buf, offset)
+        return offset - start_offset
 
     @override
     def unpack_from(self, buf: Buffer, offset: int = 0) -> tuple[GameStateMessage, int]:
-        game_map, offset_delta = self._map_codec.unpack_from(buf, offset)
-        return GameStateMessage(game_map=game_map), offset_delta
+        start_offset = offset
+        turn, offset_delta_1 = self._turn_codec.unpack_from(buf, offset)
+        offset += offset_delta_1
+
+        game_map, offset_delta_2 = self._map_codec.unpack_from(buf, offset)
+        offset += offset_delta_2
+
+        return GameStateMessage(turn=turn, game_map=game_map), offset - start_offset
 
 
 _CODEC_BY_MSG_TYPE = {

@@ -4,11 +4,12 @@ import time
 
 from common.networking import ServerNetworking
 from common.protocol import (
-    GameStateMessage,
     GreetingsMessage,
     MsgType,
     RegistrationMessageCodec,
 )
+
+from server.game import GameManager
 
 logging.basicConfig(level=logging.INFO)
 
@@ -23,6 +24,9 @@ if __name__ == "__main__":
         server = ServerNetworking()
     player_names: dict[str, str] = {}
     last_tick = time.time()
+
+    game_manager = GameManager()
+
     try:
         while True:
             # Calculate how much time is left until the next tick
@@ -58,7 +62,8 @@ if __name__ == "__main__":
                         )
                     elif msg_type == MsgType.START_GAME:
                         # TODO: Do some role management / checks here?
-                        server.send_message(client_id, GameStateMessage({}))
+                        game_manager.start()
+                        server.send_message(client_id, game_manager.as_game_state())
                     else:
                         logging.error(
                             "Encountered unexpected message type: %s from Client(%s)",

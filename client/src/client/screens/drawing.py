@@ -3,9 +3,27 @@
 import math
 
 import pyray as pr
+from common.game_state import Biome, Land
 from common.hex import Hex, HexCoord
 
 from client.screens.draw_state import HexState
+
+
+def draw_land(center: pr.Vector2, size: float, state: HexState, land: Land) -> None:
+    draw_hexagon(
+        center=center,
+        size=size,
+        color={
+            Biome.Desert: pr.BEIGE,
+            Biome.Forest: pr.DARKGREEN,
+            Biome.Grassland: pr.GREEN,
+            Biome.Hills: pr.BLUE,
+            Biome.Jungle: pr.LIME,
+            Biome.Mountains: pr.BROWN,
+            Biome.Plains: pr.YELLOW,
+        }[land.biome],
+        state=state,
+    )
 
 
 def draw_hexagon(

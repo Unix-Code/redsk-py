@@ -8,11 +8,13 @@ import pyray as pr
 from common.game_state import Biome, Land, Resource
 from common.hex import Hex
 from common.networking import ClientNetworking
+from common.protocol import GameStateMessage, GameStateMessageCodec, MsgType
 
 from client.gui import ScreenProtocol, WindowSettings
 from client.screens.draw_state import HexState
 from client.screens.drawing import (
     draw_hexagon,
+    draw_land,
     hex_coord_to_world_coord,
     world_coord_to_hex_coord,
 )
@@ -25,9 +27,11 @@ class GameScreen(ScreenProtocol):
         client_networking: ClientNetworking,
         player_id: str,
         registered_player_name: str,
+        initial_game_state: GameStateMessage,
     ) -> None:
         self.window_settings = window_settings
         self.client_networking = client_networking
+        self._game_state_message_codec = GameStateMessageCodec()
         self.player_id: str = player_id
         self.registered_player_name: str = registered_player_name
         self._hex_size: int = 60
@@ -45,7 +49,8 @@ class GameScreen(ScreenProtocol):
             self.window_settings.screen_width,
             self.window_settings.screen_height,
         )
-        self._map: dict[Hex, Land] = self._generate_map()
+        self._turn: int = initial_game_state.turn
+        self._map: dict[Hex, Land] = initial_game_state.game_map
         self._selection_controller = TileSelectionController(
             window_settings=self.window_settings,
             camera=self._camera,
@@ -56,44 +61,34 @@ class GameScreen(ScreenProtocol):
         # TODO: We just start with tile selection turned on...
         self._selection_controller.reset(1)
 
-    @classmethod
-    def _generate_land(cls) -> Land:
-        resources_points = 2
-        resources: dict[Resource, int] = {}
-        min_gen = False
-        for i in range(resources_points):
-            if min_gen and Decimal(random.random()) >= Decimal("0.5"):
-                continue
-            min_gen = True
-            new_resource = random.choice(list(Resource))
-            if new_resource not in resources:
-                resources[new_resource] = 0
-            resources[new_resource] += 1
-
-        return Land(biome=random.choice(list(Biome)), resources=resources)
-
-    @classmethod
-    def _generate_map(cls) -> dict[Hex, Land]:
-        game_map: dict[Hex, Land] = {}
-        for r in range(7):
-            for h in Hex.origin().ring(r):
-                game_map[h] = cls._generate_land()
-        return game_map
+    def _update_game_state(self, new_game_state: GameStateMessage) -> None:
+        # Maybe we can't do this so cleanly?
+        # NOTE: Update in-place to keep key set ref active
+        self._map.clear()
+        self._map.update(new_game_state.game_map)
+        self._turn = new_game_state.turn
 
     @override
     def __call__(self) -> "ScreenProtocol":
+        messages = self.client_networking.poll()
+        for msg_type, payload in messages:
+            if msg_type == MsgType.GAME_STATE:
+                self._update_game_state(
+                    new_game_state=self._game_state_message_codec.unpack(payload)
+                )
+
         self._selection_controller.update()
         self._camera_controller.update()
 
         pr.begin_texture_mode(self._target)
         pr.begin_mode_2d(self._camera)
         pr.clear_background(pr.BLANK)
-        for hex in self._map:
-            draw_hexagon(
+        for hex, land in self._map.items():
+            draw_land(
                 hex_coord_to_world_coord(hex, self._hex_size),
                 size=self._hex_size,
-                color=pr.RED,
                 state=self._selection_controller.get_state_of_hex(hex),
+                land=land,
             )
         pr.end_mode_2d()
         pr.end_texture_mode()
@@ -109,6 +104,8 @@ class GameScreen(ScreenProtocol):
         )
 
         # Draw HUD on top
+
+        pr.draw_text(f"Turn: {self._turn}", 10, 10, 20, pr.BLACK)
 
         selected_hex_screen_pos = (
             self._selection_controller.get_selection_screen_coord()
