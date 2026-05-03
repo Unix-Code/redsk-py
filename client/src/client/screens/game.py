@@ -217,7 +217,7 @@ class CameraController:
         self._window_settings = window_settings
         self._camera = camera
         self._move_speed = 500
-        self._zoom_speed = 500
+        self._zoom_speed = 50
         self._min_zoom = 0.33
         self._max_zoom = 3
 
