@@ -23,6 +23,13 @@ class WindowSettings:
     def scale(self) -> float:
         return self.screen_height / self.DEFAULT_SCREEN_HEIGHT
 
+    @property
+    def screen_center(self) -> pr.Vector2:
+        return pr.Vector2(
+            self.screen_width / 2,
+            self.screen_height / 2,
+        )
+
 
 class ScreenProtocol(Protocol):
     def __call__(self) -> "ScreenProtocol": ...
