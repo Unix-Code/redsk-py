@@ -26,7 +26,7 @@ class ConnectScreen(ScreenProtocol):
         self.window_settings = window_settings
         self.hostname = StrPointer(capacity=64, initial_value="localhost")
         self.hostname_text_box = GuiTextInputBox()
-        self.port = StrPointer(capacity=16, initial_value="65432")
+        self.port = StrPointer(capacity=16, initial_value="65434")
         self.port_text_box = GuiTextInputBox()
         self.client_networking: ClientNetworking = ClientNetworking()
 
