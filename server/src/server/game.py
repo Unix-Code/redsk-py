@@ -1,8 +1,9 @@
 import logging
 import random
+from collections.abc import Generator, Iterable
 from decimal import Decimal
 
-from common.game_state import Biome, Land, Resource
+from common.game_state import Biome, Faction, Land, PlayerCharacter, Resource
 from common.hex import Hex
 from common.protocol import GameStateMessage
 
@@ -38,21 +39,38 @@ class MapBuilder:
         return self._generate_map()
 
 
+def _generate_factions() -> Generator[Faction]:
+    available_factions = list(Faction)
+    while True:
+        yield available_factions.pop(random.randrange(len(available_factions)))
+
+
 class GameManager:
     def __init__(self) -> None:
+        self._player_characters: dict[str, PlayerCharacter] = {}
         self._map: dict[Hex, Land] = {}
 
         # TODO: Implement player turns
         self.turn: int = -1
 
-    def start(self) -> None:
+    def start(self, player_ids: Iterable[str]) -> None:
         if self.turn >= 0:
             logging.error("Can't start game again once already started...")
             return
         self._map = MapBuilder().get_initial_map()
+
+        faction_gen = _generate_factions()
+        for player_id in player_ids:
+            self._player_characters[player_id] = PlayerCharacter(
+                faction=next(faction_gen)
+            )
         self.turn = 0
 
     def as_game_state(self) -> GameStateMessage:
         if self.turn < 0:
             raise ValueError("Can't get state before game started.")
-        return GameStateMessage(turn=self.turn, game_map=self._map)
+        return GameStateMessage(
+            turn=self.turn,
+            game_map=self._map,
+            player_characters=self._player_characters,
+        )

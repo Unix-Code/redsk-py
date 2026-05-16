@@ -92,14 +92,19 @@ class PlayerCharacter:
     alignments: dict[Alignment, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        starting_fresh = not self.resources and not self.alignments
         for resource in Resource:
             if resource not in self.resources:
                 self.resources[resource] = 0
-            self.resources[resource] += AVAILABLE_FACTIONS[
-                self.faction
-            ].starting_resources.get(resource, 0)
+            if starting_fresh:
+                self.resources[resource] += AVAILABLE_FACTIONS[
+                    self.faction
+                ].starting_resources.get(resource, 0)
         for alignment in Alignment:
             if alignment not in self.alignments:
                 self.alignments[alignment] = 0
-            if alignment == AVAILABLE_FACTIONS[self.faction].starting_alignment:
+            if (
+                starting_fresh
+                and alignment == AVAILABLE_FACTIONS[self.faction].starting_alignment
+            ):
                 self.alignments[alignment] += 1

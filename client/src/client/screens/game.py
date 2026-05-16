@@ -1,19 +1,16 @@
 import logging
-import random
 from collections.abc import Set
-from decimal import Decimal
 from typing import override
 
 import pyray as pr
-from common.game_state import Biome, Land, Resource
+from common.game_state import Land, PlayerCharacter, Resource
 from common.hex import Hex
 from common.networking import ClientNetworking
 from common.protocol import GameStateMessage, GameStateMessageCodec, MsgType
 
-from client.gui import ScreenProtocol, WindowSettings
+from client.gui import LayoutBuilder, Placement, ScreenProtocol, WindowSettings
 from client.screens.draw_state import HexState
 from client.screens.drawing import (
-    draw_hexagon,
     draw_land,
     hex_coord_to_world_coord,
     world_coord_to_hex_coord,
@@ -49,41 +46,32 @@ class GameScreen(ScreenProtocol):
             self.window_settings.screen_width,
             self.window_settings.screen_height,
         )
-        self._turn: int = initial_game_state.turn
-        self._map: dict[Hex, Land] = initial_game_state.game_map
+        self._game_state = initial_game_state
+        self._selectable_hexes = set(self._game_state.game_map.keys())
         self._selection_controller = TileSelectionController(
             window_settings=self.window_settings,
             camera=self._camera,
             hex_size=self._hex_size,
-            # NOTE: This is actually a KeysView which updates alongside the original dict
-            selectable_hexes=self._map.keys(),
+            selectable_hexes=self._selectable_hexes,
         )
         # TODO: We just start with tile selection turned on...
         self._selection_controller.reset(1)
 
+    @property
+    def my_character(self) -> PlayerCharacter:
+        return self._game_state.player_characters[self.player_id]
+
     def _update_game_state(self, new_game_state: GameStateMessage) -> None:
-        # Maybe we can't do this so cleanly?
-        # NOTE: Update in-place to keep key set ref active
-        self._map.clear()
-        self._map.update(new_game_state.game_map)
-        self._turn = new_game_state.turn
+        self._game_state = new_game_state
+        # Update in place
+        self._selectable_hexes.clear()
+        self._selectable_hexes.update(self._game_state.game_map.keys())
 
-    @override
-    def __call__(self) -> "ScreenProtocol":
-        messages = self.client_networking.poll()
-        for msg_type, payload in messages:
-            if msg_type == MsgType.GAME_STATE:
-                self._update_game_state(
-                    new_game_state=self._game_state_message_codec.unpack(payload)
-                )
-
-        self._selection_controller.update()
-        self._camera_controller.update()
-
+    def _render_map(self) -> None:
         pr.begin_texture_mode(self._target)
         pr.begin_mode_2d(self._camera)
         pr.clear_background(pr.BLANK)
-        for hex, land in self._map.items():
+        for hex, land in self._game_state.game_map.items():
             draw_land(
                 hex_coord_to_world_coord(hex, self._hex_size),
                 size=self._hex_size,
@@ -103,10 +91,64 @@ class GameScreen(ScreenProtocol):
             self._target.texture, source_rec, dest_rec, pr.Vector2(0, 0), 0, pr.WHITE
         )
 
-        # Draw HUD on top
+    def _render_hud(self) -> None:
+        top_left_layout = (
+            LayoutBuilder(padding=10, margin=10)
+            .snap(Placement(y=Placement.Snap.TOP, x=Placement.Snap.LEFT))
+            .set_placement_direction(Placement.Direction.VERTICAL)
+        )
+        # TODO: Measure with text better...
+        turn_text_box = top_left_layout.place_rect(width=100, height=20)
+        pr.draw_text(
+            f"Turn: {self._game_state.turn}",
+            int(turn_text_box.x),
+            int(turn_text_box.y),
+            20,
+            pr.BLACK,
+        )
 
-        pr.draw_text(f"Turn: {self._turn}", 10, 10, 20, pr.BLACK)
+        top_right_layout = (
+            LayoutBuilder(padding=10, margin=10)
+            .snap(Placement(y=Placement.Snap.TOP, x=Placement.Snap.RIGHT))
+            .set_placement_direction(Placement.Direction.VERTICAL)
+        )
+        faction_text = f"Faction: {self.my_character.faction.name}"
+        faction_text_box = top_right_layout.place_rect(
+            width=pr.measure_text(faction_text, 20), height=20
+        )
+        pr.draw_text(
+            faction_text,
+            int(faction_text_box.x),
+            int(faction_text_box.y),
+            20,
+            pr.BLACK,
+        )
+        for resource in Resource:
+            resource_text_box = top_right_layout.place_rect(width=60, height=12)
+            pr.draw_text(
+                f"{resource.name}: {self.my_character.resources[resource]}",
+                int(resource_text_box.x),
+                int(resource_text_box.y),
+                12,
+                pr.BLACK,
+            )
 
+    @override
+    def __call__(self) -> "ScreenProtocol":
+        messages = self.client_networking.poll()
+        for msg_type, payload in messages:
+            if msg_type == MsgType.GAME_STATE:
+                self._update_game_state(
+                    new_game_state=self._game_state_message_codec.unpack(payload)
+                )
+
+        self._selection_controller.update()
+        self._camera_controller.update()
+
+        self._render_map()
+        self._render_hud()
+
+        # Selected Hex tooltips
         selected_hex_screen_pos = (
             self._selection_controller.get_selection_screen_coord()
         )

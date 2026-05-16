@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import Enum, IntEnum
 from typing import Any, ClassVar, Hashable, Protocol, TypeVar, cast, get_args, override
 
-from common.game_state import Biome, Faction, Land, Resource
+from common.game_state import Alignment, Biome, Faction, Land, PlayerCharacter, Resource
 from common.hex import Hex
 
 
@@ -207,6 +207,50 @@ class LandNetworkCodec(NetworkCodec[Land]):
         return Land(biome=biome, resources=resources), offset - start_offset
 
 
+class PlayerCharacterCodec(NetworkCodec[PlayerCharacter]):
+    def __init__(self) -> None:
+        self._faction_codec = EnumNetworkCodec(Faction)
+        self._resources_codec = DictNetworkCodec(
+            key_codec=EnumNetworkCodec(Resource),
+            value_codec=PrimitiveStructNetworkCodec[int](">B"),
+        )
+        self._alignments_codec = DictNetworkCodec(
+            key_codec=EnumNetworkCodec(Alignment),
+            value_codec=PrimitiveStructNetworkCodec[int](">B"),
+        )
+
+    @override
+    def pack_into(self, obj: PlayerCharacter, buf: Buffer, offset: int = 0) -> int:
+        start_offset = offset
+        offset += self._faction_codec.pack_into(obj.faction, buf, offset)
+        offset += self._resources_codec.pack_into(
+            # NOTE: We filter out 0-valued resources to avoid sending more data over the wire.
+            {k: v for k, v in obj.resources.items() if v != 0},
+            buf,
+            offset,
+        )
+        offset += self._alignments_codec.pack_into(
+            # NOTE: We filter out 0-valued resources to avoid sending more data over the wire.
+            {k: v for k, v in obj.alignments.items() if v != 0},
+            buf,
+            offset,
+        )
+        return offset - start_offset
+
+    @override
+    def unpack_from(self, buf: Buffer, offset: int = 0) -> tuple[PlayerCharacter, int]:
+        start_offset = offset
+        faction, offset_delta_1 = self._faction_codec.unpack_from(buf, offset)
+        offset += offset_delta_1
+        resources, offset_delta_2 = self._resources_codec.unpack_from(buf, offset)
+        offset += offset_delta_2
+        alignments, offset_delta_3 = self._alignments_codec.unpack_from(buf, offset)
+        offset += offset_delta_3
+        return PlayerCharacter(
+            faction=faction, resources=resources, alignments=alignments
+        ), offset - start_offset
+
+
 @dataclass
 class GreetingsMessage(TypedNetworkMessage):
     MESSAGE_TYPE: ClassVar[MsgType] = MsgType.GREETINGS
@@ -280,6 +324,7 @@ class GameStateMessage(TypedNetworkMessage):
     # TODO: There should be more fields here...
     turn: int
     game_map: dict[Hex, Land]
+    player_characters: dict[str, PlayerCharacter]
 
 
 class GameStateMessageCodec(NetworkCodec[GameStateMessage]):
@@ -288,12 +333,18 @@ class GameStateMessageCodec(NetworkCodec[GameStateMessage]):
         self._map_codec = DictNetworkCodec(
             key_codec=HexNetworkCodec(), value_codec=LandNetworkCodec()
         )
+        self._player_character_codec = DictNetworkCodec(
+            key_codec=StringNetworkCodec(), value_codec=PlayerCharacterCodec()
+        )
 
     @override
     def pack_into(self, obj: GameStateMessage, buf: Buffer, offset: int = 0) -> int:
         start_offset = offset
         offset += self._turn_codec.pack_into(obj.turn, buf, offset)
         offset += self._map_codec.pack_into(obj.game_map, buf, offset)
+        offset += self._player_character_codec.pack_into(
+            obj.player_characters, buf, offset
+        )
         return offset - start_offset
 
     @override
@@ -305,7 +356,14 @@ class GameStateMessageCodec(NetworkCodec[GameStateMessage]):
         game_map, offset_delta_2 = self._map_codec.unpack_from(buf, offset)
         offset += offset_delta_2
 
-        return GameStateMessage(turn=turn, game_map=game_map), offset - start_offset
+        player_characters, offset_delta_3 = self._player_character_codec.unpack_from(
+            buf, offset
+        )
+        offset += offset_delta_3
+
+        return GameStateMessage(
+            turn=turn, game_map=game_map, player_characters=player_characters
+        ), offset - start_offset
 
 
 _CODEC_BY_MSG_TYPE = {

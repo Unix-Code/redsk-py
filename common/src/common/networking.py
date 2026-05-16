@@ -2,6 +2,7 @@ import errno
 import logging
 import selectors
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from socket import AF_INET, SO_ERROR, SOCK_STREAM, SOL_SOCKET, socket
@@ -357,3 +358,9 @@ class ServerNetworking:
 
     def send_message(self, client_id: ClientId, msg: TypedNetworkMessage) -> None:
         return self.common_networking.send_message(client_id=client_id, msg=msg)
+
+    def broadcast_message(
+        self, client_ids: Iterable[ClientId], msg: TypedNetworkMessage
+    ) -> None:
+        for client_id in client_ids:
+            self.send_message(client_id, msg)
