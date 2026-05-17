@@ -85,7 +85,18 @@ if __name__ == "__main__":
                                 client_id,
                             )
                     elif server_state == ServerState.GAME:
-                        pass
+                        if msg_type == MsgType.ACTION_LEARN:
+                            # TODO: Verify whose turn it is...
+                            game_manager.perform_action_learn(client_id)
+                            server.broadcast_message(
+                                player_names.keys(), game_manager.as_game_state()
+                            )
+                        else:
+                            logging.error(
+                                "Encountered unexpected message type: %s from Client(%s)",
+                                msg_type,
+                                client_id,
+                            )
             last_tick = time.time()
     except (KeyboardInterrupt, SystemExit):
         server.close()

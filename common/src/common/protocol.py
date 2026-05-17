@@ -2,7 +2,7 @@ import struct
 from collections.abc import Buffer
 from dataclasses import dataclass
 from enum import Enum, IntEnum
-from typing import Any, ClassVar, Hashable, Protocol, TypeVar, cast, get_args, override
+from typing import Any, ClassVar, Hashable, Protocol, TypeVar, cast, override
 
 from common.game_state import Alignment, Biome, Faction, Land, PlayerCharacter, Resource
 from common.hex import Hex
@@ -13,6 +13,7 @@ class MsgType(IntEnum):
     REGISTRATION = 1
     START_GAME = 2
     GAME_STATE = 3
+    ACTION_LEARN = 4  # TODO: Look up the actual name of this Action in the game
 
 
 T = TypeVar("T")
@@ -67,7 +68,7 @@ class StringNetworkCodec(NetworkCodec[str]):
     @override
     def unpack_from(self, buf: Buffer, offset: int = 0) -> tuple[str, int]:
         start_offset = offset
-        str_len_format = f">H"
+        str_len_format = ">H"
         (str_len,) = struct.unpack_from(str_len_format, buf, offset)
         offset += struct.calcsize(str_len_format)
         (byte_str,) = struct.unpack_from(f">{str_len}s", buf, offset)
@@ -366,11 +367,25 @@ class GameStateMessageCodec(NetworkCodec[GameStateMessage]):
         ), offset - start_offset
 
 
+@dataclass
+class ActionLearnMessage(TypedNetworkMessage):
+    MESSAGE_TYPE: ClassVar[MsgType] = MsgType.ACTION_LEARN
+
+
+class ActionLearnMessageCodec(NetworkCodec[ActionLearnMessage]):
+    @override
+    def unpack_from(
+        self, buf: Buffer, offset: int = 0
+    ) -> tuple[ActionLearnMessage, int]:
+        return ActionLearnMessage(), offset
+
+
 _CODEC_BY_MSG_TYPE = {
     MsgType.GREETINGS: GreetingsMessageCodec(),
     MsgType.REGISTRATION: RegistrationMessageCodec(),
     MsgType.START_GAME: StartGameMessageCodec(),
     MsgType.GAME_STATE: GameStateMessageCodec(),
+    MsgType.ACTION_LEARN: ActionLearnMessageCodec(),
 }
 
 

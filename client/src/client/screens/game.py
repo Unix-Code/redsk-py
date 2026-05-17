@@ -6,7 +6,12 @@ import pyray as pr
 from common.game_state import Land, PlayerCharacter, Resource
 from common.hex import Hex
 from common.networking import ClientNetworking
-from common.protocol import GameStateMessage, GameStateMessageCodec, MsgType
+from common.protocol import (
+    ActionLearnMessage,
+    GameStateMessage,
+    GameStateMessageCodec,
+    MsgType,
+)
 
 from client.gui import LayoutBuilder, Placement, ScreenProtocol, WindowSettings
 from client.screens.draw_state import HexState
@@ -56,12 +61,17 @@ class GameScreen(ScreenProtocol):
         )
         # TODO: We just start with tile selection turned on...
         self._selection_controller.reset(1)
+        self._is_action_pending = False
 
     @property
     def my_character(self) -> PlayerCharacter:
         return self._game_state.player_characters[self.player_id]
 
     def _update_game_state(self, new_game_state: GameStateMessage) -> None:
+        # TODO: Maybe this is incorrect behavior? Actions may be independent from game state updates.
+        print("Updating Game State...")
+        self._is_action_pending = False
+
         self._game_state = new_game_state
         # Update in place
         self._selectable_hexes.clear()
@@ -133,6 +143,11 @@ class GameScreen(ScreenProtocol):
                 pr.BLACK,
             )
 
+        action_learn_button = top_right_layout.place_rect(width=150, height=22)
+        if pr.gui_button(action_learn_button, "Action | Learn"):
+            self.client_networking.send_message(ActionLearnMessage())
+            self._is_action_pending = True
+
     @override
     def __call__(self) -> "ScreenProtocol":
         messages = self.client_networking.poll()
@@ -146,7 +161,11 @@ class GameScreen(ScreenProtocol):
         self._camera_controller.update()
 
         self._render_map()
-        self._render_hud()
+
+        if self._is_action_pending:
+            pr.gui_disable()
+        else:
+            pr.gui_enable()
 
         # Selected Hex tooltips
         selected_hex_screen_pos = (
@@ -161,6 +180,8 @@ class GameScreen(ScreenProtocol):
                 20,
                 pr.BLUE,
             )
+
+        self._render_hud()
 
         return self
 

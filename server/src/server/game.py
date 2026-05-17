@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from common.game_state import Biome, Faction, Land, PlayerCharacter, Resource
 from common.hex import Hex
-from common.protocol import GameStateMessage
+from common.protocol import GameStateMessage, MsgType, TypedNetworkMessage
 
 
 class MapBuilder:
@@ -65,6 +65,10 @@ class GameManager:
                 faction=next(faction_gen)
             )
         self.turn = 0
+
+    def perform_action_learn(self, player_id: str) -> None:
+        # TODO: Track history of actions for undo/redo
+        self._player_characters[player_id].resources[Resource.Culture] += 1
 
     def as_game_state(self) -> GameStateMessage:
         if self.turn < 0:
