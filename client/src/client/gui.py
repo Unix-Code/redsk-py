@@ -7,7 +7,12 @@ from typing import ClassVar, Literal, Protocol, Self, Union
 
 import pyray as pr
 
-from client.utils import StrPointer, bbox2d_contains_rect, bbox2d_pad
+from client.utils import (
+    StrPointer,
+    bbox2d_contains_rect,
+    bbox2d_encompassing,
+    bbox2d_pad,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -126,8 +131,50 @@ class FlowLayout:
         self._anchor: Anchor = anchor
         self._cursor: pr.Vector2 = pr.Vector2(anchor.coords.x, anchor.coords.y)
         self._initial_placement: bool = True
+        self._bounding_box: pr.Rectangle = pr.Rectangle(
+            self._placement_container.x, self._placement_container.y, 0, 0
+        )
 
-    def place_rect(self, width: float, height: float) -> pr.Rectangle:
+    @property
+    def bounding_box(self) -> pr.Rectangle:
+        """Returns the rectangle encompassing all placed elements."""
+        return self._bounding_box
+
+    def shift_cursor(self, width: float, height: float) -> None:
+        """Given child width+height, shift the cursor ahead of the next placement,
+
+        Note:
+            Takes into account flow_direction and margin and reversed placement
+        """
+        if (
+            self._anchor.snap_position.x == Placement.Snap.CENTER
+            and self._anchor.snap_position.y == Placement.Snap.CENTER
+        ):
+            if not self._initial_placement:
+                logger.warning("No where to place centered subsequent Rectangle")
+        elif self._config.flow_direction == Placement.Direction.HORIZONTAL:
+            shift = width + self._config.margin
+            if self._config.reversed_horizontal:
+                shift *= -1
+            self._cursor = pr.Vector2(self._cursor.x + shift, self._cursor.y)
+        elif self._config.flow_direction == Placement.Direction.VERTICAL:
+            shift = height + self._config.margin
+            if self._config.reversed_vertical:
+                shift *= -1
+            self._cursor = pr.Vector2(self._cursor.x, self._cursor.y + shift)
+
+    def place_rect(
+        self,
+        width: float | Literal["fill"],
+        height: float | Literal["fill"],
+        virtual: bool = False,
+    ) -> pr.Rectangle:
+        if width == "fill":
+            width = self._placement_container.width
+
+        if height == "fill":
+            height = self._placement_container.height
+
         # NOTE: Here we want to position the new rect placement point (always top-left) so that the
         #       snap position of the anchor aligns with the snap position of the new Rectangle.
         if self._anchor.snap_position.y == Placement.Snap.TOP:
@@ -165,28 +212,17 @@ class FlowLayout:
                 ),
             )
 
-        if (
-            self._anchor.snap_position.x == Placement.Snap.CENTER
-            and self._anchor.snap_position.y == Placement.Snap.CENTER
-        ):
-            if not self._initial_placement:
-                logger.warning("No where to place centered subsequent Rectangle")
-        # NOTE: Now that we've placed a Rectangle, we need to shift our cursor to the next position,
-        #       taking into account flow_direction and margin and reversed placement
-        elif self._config.flow_direction == Placement.Direction.HORIZONTAL:
-            shift = width + self._config.margin
-            if self._config.reversed_horizontal:
-                shift *= -1
-            self._cursor = pr.Vector2(self._cursor.x + shift, self._cursor.y)
-        elif self._config.flow_direction == Placement.Direction.VERTICAL:
-            shift = height + self._config.margin
-            if self._config.reversed_vertical:
-                shift *= -1
-            self._cursor = pr.Vector2(self._cursor.x, self._cursor.y + shift)
-
-        self._initial_placement = False
+        #   When it's a virtual placement (reservation), we don't actually change any state in
+        #   our layout.
+        if not virtual:
+            self.shift_cursor(width, height)
+            self._initial_placement = False
+            self.include_rect(new_rect)
 
         return new_rect
+
+    def include_rect(self, rect: pr.Rectangle) -> None:
+        self._bounding_box = bbox2d_encompassing(self._bounding_box, rect)
 
 
 class LayoutBuilder:
@@ -260,25 +296,75 @@ class LayoutBuilder:
         self._flow_direction = direction
         return self
 
-    def place_rect(self, width: float, height: float) -> pr.Rectangle:
+    def _init_layout_strategy(self) -> None:
+        self._layout_strategy = FlowLayout(
+            config=FlowLayoutConfig(
+                flow_direction=self._flow_direction,
+                reversed_horizontal=(
+                    self._anchor.snap_position.x == Placement.Snap.RIGHT
+                ),
+                reversed_vertical=(
+                    self._anchor.snap_position.y == Placement.Snap.BOTTOM
+                ),
+                padding=self._padding,
+                margin=self._margin,
+            ),
+            parent_container=self._parent,
+            anchor=self._anchor,
+        )
+
+    def place_rect(
+        self,
+        width: float | Literal["fill"],
+        height: float | Literal["fill"],
+    ) -> pr.Rectangle:
         if self._layout_strategy is None:
             # TODO: Support other layout types...
-            self._layout_strategy = FlowLayout(
-                config=FlowLayoutConfig(
-                    flow_direction=self._flow_direction,
-                    reversed_horizontal=(
-                        self._anchor.snap_position.x == Placement.Snap.RIGHT
-                    ),
-                    reversed_vertical=(
-                        self._anchor.snap_position.y == Placement.Snap.BOTTOM
-                    ),
-                    padding=self._padding,
-                    margin=self._margin,
-                ),
-                parent_container=self._parent,
-                anchor=self._anchor,
-            )
+            self._init_layout_strategy()
+            assert self._layout_strategy is not None
         return self._layout_strategy.place_rect(width=width, height=height)
+
+    def place_text(
+        self, text: str, padding_x: float = 0, padding_y: float = 0
+    ) -> pr.Rectangle:
+        text_size = gui_measure_text_size(text)
+        return self.place_rect(
+            width=text_size.x + padding_x, height=text_size.y + padding_y
+        )
+
+    def place_virtual_rect(
+        self,
+        width: float | Literal["fill"],
+        height: float | Literal["fill"],
+    ) -> pr.Rectangle:
+        if self._layout_strategy is None:
+            # TODO: Support other layout types...
+            self._init_layout_strategy()
+            assert self._layout_strategy is not None
+        return self._layout_strategy.place_rect(
+            width=width, height=height, virtual=True
+        )
+
+    @property
+    def bounding_box(self) -> pr.Rectangle:
+        """Returns the rectangle encompassing all placed elements."""
+        return (
+            self._layout_strategy.bounding_box
+            if self._layout_strategy is not None
+            else pr.Rectangle(self._anchor.coords.x, self._anchor.coords.y, 0, 0)
+        )
+
+    def include_rect(self, rect: pr.Rectangle) -> None:
+        if self._layout_strategy is None:
+            # TODO: Support other layout types...
+            self._init_layout_strategy()
+            assert self._layout_strategy is not None
+        self._layout_strategy.include_rect(rect)
+
+    @property
+    def reserved_box(self) -> pr.Rectangle:
+        """Returns the rectangle encompassing the reserved rectangle for this layout."""
+        return self._parent
 
 
 @contextmanager
@@ -286,3 +372,13 @@ def gui_set_text_size(size: int) -> Generator[None]:
     pr.gui_set_style(pr.GuiControl.DEFAULT, pr.GuiDefaultProperty.TEXT_SIZE, size)
     yield
     pr.gui_load_style_default()
+
+
+def gui_measure_text_size(text: str, spacing: float = 1) -> pr.Vector2:
+    size = pr.gui_get_style(pr.GuiControl.DEFAULT, pr.GuiDefaultProperty.TEXT_SIZE)
+    return pr.measure_text_ex(pr.gui_get_font(), text, size, spacing)
+
+
+def gui_label(text: str, layout: LayoutBuilder) -> None:
+    text_rect = layout.place_text(text, padding_x=3)
+    pr.gui_label(text_rect, text)

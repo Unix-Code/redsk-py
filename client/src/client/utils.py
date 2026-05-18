@@ -22,6 +22,16 @@ def bbox2d_contains_rect(rect: pr.Rectangle, rect2: pr.Rectangle) -> bool:
     )
 
 
+def bbox2d_encompassing(rect: pr.Rectangle, rect2: pr.Rectangle) -> pr.Rectangle:
+    """Returns encompassing Rectangle between 2 rectangles"""
+    min_x = min(rect.x, rect2.x)
+    min_y = min(rect.y, rect2.y)
+    max_x = max(rect.x + rect.width, rect2.x + rect2.width)
+    max_y = max(rect.y + rect.height, rect2.y + rect2.height)
+
+    return pr.Rectangle(min_x, min_y, max_x - min_x, max_y - min_y)
+
+
 class Pointer[T](Protocol):
     @property
     def ptr(self) -> Any: ...

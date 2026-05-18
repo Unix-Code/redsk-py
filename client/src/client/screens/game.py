@@ -13,13 +13,22 @@ from common.protocol import (
     MsgType,
 )
 
-from client.gui import LayoutBuilder, Placement, ScreenProtocol, WindowSettings
+from client.gui import (
+    LayoutBuilder,
+    Placement,
+    ScreenProtocol,
+    WindowSettings,
+    gui_label,
+    gui_measure_text_size,
+    gui_set_text_size,
+)
 from client.screens.draw_state import HexState
 from client.screens.drawing import (
     draw_land,
     hex_coord_to_world_coord,
     world_coord_to_hex_coord,
 )
+from client.utils import bbox2d_pad
 
 
 class GameScreen(ScreenProtocol):
@@ -62,6 +71,7 @@ class GameScreen(ScreenProtocol):
         # TODO: We just start with tile selection turned on...
         self._selection_controller.reset(1)
         self._is_action_pending = False
+        self._is_action_drawer_open = False
 
     @property
     def my_character(self) -> PlayerCharacter:
@@ -102,51 +112,74 @@ class GameScreen(ScreenProtocol):
         )
 
     def _render_hud(self) -> None:
-        top_left_layout = (
-            LayoutBuilder(padding=10, margin=10)
-            .snap(Placement(y=Placement.Snap.TOP, x=Placement.Snap.LEFT))
-            .set_placement_direction(Placement.Direction.VERTICAL)
-        )
-        # TODO: Measure with text better...
-        turn_text_box = top_left_layout.place_rect(width=100, height=20)
-        pr.draw_text(
-            f"Turn: {self._game_state.turn}",
-            int(turn_text_box.x),
-            int(turn_text_box.y),
-            20,
-            pr.BLACK,
-        )
-
-        top_right_layout = (
-            LayoutBuilder(padding=10, margin=10)
+        root_layout = (
+            LayoutBuilder()
             .snap(Placement(y=Placement.Snap.TOP, x=Placement.Snap.RIGHT))
             .set_placement_direction(Placement.Direction.VERTICAL)
         )
-        faction_text = f"Faction: {self.my_character.faction.name}"
-        faction_text_box = top_right_layout.place_rect(
-            width=pr.measure_text(faction_text, 20), height=20
+        header_rect = root_layout.place_rect(width="fill", height=50)
+        header_layout = (
+            LayoutBuilder(padding=10, margin=10)
+            .snap(
+                Placement(y=Placement.Snap.CENTER, x=Placement.Snap.LEFT),
+                parent=header_rect,
+            )
+            .set_placement_direction(Placement.Direction.HORIZONTAL)
         )
-        pr.draw_text(
-            faction_text,
-            int(faction_text_box.x),
-            int(faction_text_box.y),
-            20,
-            pr.BLACK,
-        )
-        for resource in Resource:
-            resource_text_box = top_right_layout.place_rect(width=60, height=12)
-            pr.draw_text(
-                f"{resource.name}: {self.my_character.resources[resource]}",
-                int(resource_text_box.x),
-                int(resource_text_box.y),
-                12,
-                pr.BLACK,
+
+        pr.draw_rectangle_rec(bbox2d_pad(header_rect, 1), pr.LIGHTGRAY)
+        pr.draw_rectangle_lines_ex(header_rect, 1, pr.BLACK)
+
+        self._selection_controller.mute_screen_rect(header_rect)
+        self._camera_controller.mute_screen_rect(header_rect)
+
+        with gui_set_text_size(20):
+            gui_label(text=f"Turn: {self._game_state.turn}", layout=header_layout)
+            gui_label(
+                text=f"Faction: {self.my_character.faction.name}", layout=header_layout
             )
 
-        action_learn_button = top_right_layout.place_rect(width=150, height=22)
-        if pr.gui_button(action_learn_button, "Action | Learn"):
-            self.client_networking.send_message(ActionLearnMessage())
-            self._is_action_pending = True
+            for resource in Resource:
+                gui_label(
+                    text=f"{resource.name}: {self.my_character.resources[resource]}",
+                    layout=header_layout,
+                )
+
+        if pr.is_key_pressed(pr.KeyboardKey.KEY_I):
+            self._is_action_drawer_open = not self._is_action_drawer_open
+
+        if self._is_action_drawer_open:
+            action_drawer_rect = root_layout.place_rect(
+                width=300,
+                height=self.window_settings.screen_height - header_rect.height,
+            )
+            action_drawer_layout = (
+                LayoutBuilder(padding=20, margin=20)
+                .snap(
+                    Placement(y=Placement.Snap.TOP, x=Placement.Snap.CENTER),
+                    parent=action_drawer_rect,
+                )
+                .set_placement_direction(Placement.Direction.VERTICAL)
+            )
+
+            pr.draw_rectangle_rec(bbox2d_pad(action_drawer_rect, 1), pr.LIGHTGRAY)
+            pr.draw_rectangle_lines_ex(action_drawer_rect, 1, pr.BLACK)
+
+            self._selection_controller.mute_screen_rect(action_drawer_rect)
+            self._camera_controller.mute_screen_rect(action_drawer_rect)
+
+            with gui_set_text_size(30):
+                gui_label(text="ACTIONS", layout=action_drawer_layout)
+
+            with gui_set_text_size(20):
+                action_learn_button_text = "Learn"
+                action_learn_button = action_drawer_layout.place_rect(
+                    width=150,
+                    height=gui_measure_text_size(action_learn_button_text).y + 10,
+                )
+                if pr.gui_button(action_learn_button, action_learn_button_text):
+                    self.client_networking.send_message(ActionLearnMessage())
+                    self._is_action_pending = True
 
     @override
     def __call__(self) -> "ScreenProtocol":
@@ -157,8 +190,8 @@ class GameScreen(ScreenProtocol):
                     new_game_state=self._game_state_message_codec.unpack(payload)
                 )
 
-        self._selection_controller.update()
-        self._camera_controller.update()
+        self._selection_controller.unmute()
+        self._camera_controller.unmute()
 
         self._render_map()
 
@@ -183,6 +216,10 @@ class GameScreen(ScreenProtocol):
 
         self._render_hud()
 
+        # Update UI Inputs
+        self._selection_controller.update()
+        self._camera_controller.update()
+
         return self
 
 
@@ -202,6 +239,19 @@ class TileSelectionController:
         self._is_clicking: bool = False
         self.selection: list[Hex] = []
         self.hovered: Hex | None = None
+        self._muted_screen_rects: list[pr.Rectangle] = []
+
+    def mute_screen_rect(self, rect: pr.Rectangle) -> None:
+        self._muted_screen_rects.append(rect)
+
+    def unmute(self) -> None:
+        self._muted_screen_rects.clear()
+
+    def _is_mouse_in_muted_area(self) -> bool:
+        return any(
+            pr.check_collision_point_rec(pr.get_mouse_position(), muted_rect)
+            for muted_rect in self._muted_screen_rects
+        )
 
     def get_state_of_hex(self, hex: Hex) -> HexState:
         if hex not in self._selectable_hexes:
@@ -238,7 +288,7 @@ class TileSelectionController:
         return hex
 
     def update(self) -> None:
-        if not self.is_enabled:
+        if not self.is_enabled or self._is_mouse_in_muted_area():
             return
 
         self.hovered = self.get_mouse_hex()
@@ -283,6 +333,19 @@ class CameraController:
         self._zoom_speed = 50
         self._min_zoom = 0.33
         self._max_zoom = 3
+        self._muted_screen_rects: list[pr.Rectangle] = []
+
+    def mute_screen_rect(self, rect: pr.Rectangle) -> None:
+        self._muted_screen_rects.append(rect)
+
+    def unmute(self) -> None:
+        self._muted_screen_rects.clear()
+
+    def _is_mouse_in_muted_area(self) -> bool:
+        return any(
+            pr.check_collision_point_rec(pr.get_mouse_position(), muted_rect)
+            for muted_rect in self._muted_screen_rects
+        )
 
     def reset(self) -> None:
         self._camera.zoom = 1
@@ -296,19 +359,20 @@ class CameraController:
         if pr.is_key_pressed(pr.KeyboardKey.KEY_ZERO):
             self.reset()
 
-        zoom_delta = pr.get_mouse_wheel_move()
-        if zoom_delta != 0:
-            # Zoom to Mouse Position
-            self._camera.target = pr.get_screen_to_world_2d(
-                pr.get_mouse_position(), self._camera
-            )
-            self._camera.offset = pr.get_mouse_position()
+        if not self._is_mouse_in_muted_area():
+            zoom_delta = pr.get_mouse_wheel_move()
+            if zoom_delta != 0:
+                # Zoom to Mouse Position
+                self._camera.target = pr.get_screen_to_world_2d(
+                    pr.get_mouse_position(), self._camera
+                )
+                self._camera.offset = pr.get_mouse_position()
 
-            self._camera.zoom = pr.clamp(
-                self._camera.zoom + (zoom_delta * self._zoom_speed * dt),
-                self._min_zoom,
-                self._max_zoom,
-            )
+                self._camera.zoom = pr.clamp(
+                    self._camera.zoom + (zoom_delta * self._zoom_speed * dt),
+                    self._min_zoom,
+                    self._max_zoom,
+                )
 
         translation = pr.vector2_zero()
         if pr.is_key_down(pr.KeyboardKey.KEY_W):
